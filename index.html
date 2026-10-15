@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#7c3aed">
+<title>Nossa Rotina</title>
+<style>
+:root{--bg:#faf7fb;--card:#fff;--txt:#2d2437;--mut:#7a6f85;--pri:#7c3aed;--ok:#16a34a;--warn:#dc2626;--line:#ece6f2}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#1b1622;--card:#261f30;--txt:#f1ebf7;--mut:#a79bb5;--pri:#a78bfa;--ok:#4ade80;--warn:#f87171;--line:#3a3146}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--txt);padding-bottom:190px}
+header{padding:16px 16px 8px;font-size:22px;font-weight:700}
+nav{display:flex;gap:6px;padding:0 12px;overflow-x:auto}
+nav button{flex:1;border:0;padding:10px 8px;border-radius:12px;background:var(--card);color:var(--txt);font-size:15px;white-space:nowrap;border:1px solid var(--line)}
+nav button.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+main{padding:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1}
+.mut{color:var(--mut);font-size:14px}
+.big{font-size:26px;font-weight:700}
+.del{background:none;border:0;color:var(--warn);font-size:18px;padding:4px}
+.ck{font-size:22px;background:none;border:0;padding:0}
+h3{margin:16px 4px 6px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--pri)}
+#dock{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:50px 12px 14px}
+#mic{position:absolute;left:50%;top:-36px;transform:translateX(-50%);width:72px;height:72px;border-radius:50%;border:0;background:var(--pri);color:#fff;font-size:30px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#mic.ouvindo{background:var(--warn);animation:pulso 1s infinite}
+@keyframes pulso{50%{transform:translateX(-50%) scale(1.08)}}
+#resp{min-height:40px;font-size:15px;text-align:center;margin-bottom:8px}
+form{display:flex;gap:8px}
+input{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font-size:16px;min-width:0}
+form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);color:#fff;font-size:16px}
+.ex{font-size:12px;color:var(--mut);margin-top:8px;text-align:center;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="login" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:10;padding:24px;align-items:center;justify-content:center;flex-direction:column">
+  <div class="card" style="width:100%;max-width:360px">
+    <div class="big" style="margin-bottom:12px">🌷 Nossa Rotina</div>
+    <form id="loginForm" style="flex-direction:column">
+      <input id="email" type="email" placeholder="E-mail" autocomplete="username" style="margin-bottom:8px">
+      <input id="senha" type="password" placeholder="Senha" autocomplete="current-password" style="margin-bottom:8px">
+      <button style="width:100%">Entrar</button>
+    </form>
+    <div id="loginMsg" class="mut" style="margin-top:10px"></div>
+  </div>
+</div>
+<header>🌷 Nossa Rotina</header>
+<nav id="abas">
+  <button data-aba="hoje" class="on">Hoje</button>
+  <button data-aba="gastos">Gastos</button>
+  <button data-aba="rotina">Rotina</button>
+  <button data-aba="metas">Metas</button>
+</nav>
+<main id="view"></main>
+
+<div id="dock">
+  <button id="mic" title="Falar">🎙️</button>
+  <div id="resp" class="mut">Toque no microfone e fale. Ex: "gastei 45 reais no mercado"</div>
+  <form id="form">
+    <input id="txt" placeholder="ou digite aqui" autocomplete="off">
+    <button>OK</button>
+  </form>
+  <div class="ex">
+    "me lembra de ir ao médico amanhã às 15h" · "rotina tomar remédio às 8h"<br>
+    "meta viagem 5000" · "adiciona 200 na meta viagem" · "quanto gastei esse mês"
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-firestore-compat.js"></script>
+<script>
+/* ---------- utilidades ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const fmtR = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const iso = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const addDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return iso(x); };
+const brData = s => s.split('-').reverse().join('/');
+const capitalizar = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const pct = m => m.alvo > 0 ? Math.min(100, Math.round(m.atual / m.alvo * 100)) : 0;
+const DIAS = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
+const CATS = {
+  'Mercado': /mercad|supermerc|feira|padaria|acougue/,
+  'Transporte': /gasolin|combust|uber|onibus|estacion|pedagio|taxi|passagem/,
+  'Saúde': /farm|remed|medic|consult|dentista|plano|exame/,
+  'Alimentação': /restaur|ifood|lanche|pizza|almoc|jantar|cafe|sorvete/,
+  'Casa': /luz|energia|agua|aluguel|condominio|internet|gas de cozinha|diarista/,
+  'Lazer': /cinema|bar|viagem|passeio|show|festa/
+};
+const RE_HORA = /(?:(?<!\p{L})(?:às|as|a)\s+)?\d{1,2}(?::|h)(?:\d{2})?\b/iu;
+const RE_DATA = /depois de amanh[aã]|amanh[aã]|\bhoje\b|\b(segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(-feira)?\b/i;
+const RE_NUM = /(\d+(?:[.,]\d{1,2})?)/;
+
+/* ---------- armazenamento na nuvem (Firebase) ---------- */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAI1qBDtaGG0IQ-SxEqxc9nju50AZ1wivY",
+  authDomain: "nossa-rotina-e910a.firebaseapp.com",
+  projectId: "nossa-rotina-e910a",
+  storageBucket: "nossa-rotina-e910a.firebasestorage.app",
+  messagingSenderId: "972214914164",
+  appId: "1:972214914164:web:629d55a100491727dd1521"
+};
+// só estes dois e-mails conseguem entrar (também travado nas regras do banco)
+const EMAILS_PERMITIDOS = ['paulopedrosonutri@gmail.com', 'vanessaccarvalhopedroso@hotmail.com'];
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const docRef = firebase.firestore().collection('familia').doc('dados');
+let db = { compromissos: [], gastos: [], rotina: [], metas: [] };
+let pronto = false; // só grava depois de ler a nuvem, para nunca apagar dados por engano
+function salvar() {
+  if (!pronto) return;
+  docRef.set(db).catch(() => responder('⚠️ Não consegui salvar agora. Verifique a internet.'));
+}
+function iniciarSync() {
+  docRef.onSnapshot(snap => {
+    const d = snap.data() || {};
+    db = {
+      compromissos: d.compromissos || [], gastos: d.gastos || [],
+      rotina: d.rotina || [], metas: d.metas || []
+    };
+    if (!pronto) {
+      pronto = true;
+      render();
+      checarLembretes();
+      setInterval(checarLembretes, 30000);
+    } else {
+      render();
+    }
+  }, err => responder('⚠️ Sem acesso aos dados: ' + err.message));
+}
+
+/* ---------- entendimento dos comandos ---------- */
+function extrairHora(s) {
+  const m = s.match(/(\d{1,2})(?::|h)(\d{2})?/i);
+  if (!m) return null;
+  const h = +m[1], min = m[2] ? +m[2] : 0;
+  if (h > 23 || min > 59) return null;
+  return { hora: String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0') };
+}
+function extrairData(s) {
+  const n = norm(s);
+  const hoje = new Date();
+  if (/depois de amanha/.test(n)) return addDias(hoje, 2);
+  if (/amanha/.test(n)) return addDias(hoje, 1);
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(); d.setDate(d.getDate() + i);
+    if (new RegExp('\\b' + DIAS[d.getDay()] + '\\b').test(n)) return iso(d);
+  }
+  return iso(hoje);
+}
+// tira do texto original as palavras de comando, data e hora, sobrando o título
+function limpar(s) {
+  return s
+    .replace(RE_HORA, ' ').replace(RE_DATA, ' ')
+    .replace(/\b(me lembra de|me lembra|me lembrar de|lembrete|lembrar de|lembrar|agendar|agenda|anotar|anota|compromisso|rotina|reais|real)\b/gi, ' ')
+    .replace(/\s+/g, ' ').replace(/^[\s:,\-]+|[\s,.:]+$/g, '')
+    .replace(/^de /i, '').trim();
+}
+
+function addCompromisso(orig) {
+  const h = extrairHora(orig.replace(RE_DATA, ' '));
+  const data = extrairData(orig);
+  const titulo = limpar(orig);
+  if (!titulo) return 'Diga o compromisso. Exemplo: me lembra de ir ao médico amanhã às 15h.';
+  db.compromissos.push({ id: uid(), titulo: capitalizar(titulo), data, hora: h ? h.hora : null, avisado: false });
+  return `Anotado: ${capitalizar(titulo)}, ${data === iso() ? 'hoje' : brData(data)}${h ? ' às ' + h.hora : ''}.`;
+}
+
+function addRotina(orig) {
+  const h = extrairHora(orig);
+  const titulo = limpar(orig);
+  if (!titulo) return 'Diga o que fazer. Exemplo: rotina tomar remédio às 8h.';
+  const agora = new Date().toTimeString().slice(0, 5);
+  db.rotina.push({
+    id: uid(), titulo: capitalizar(titulo), hora: h ? h.hora : null, feitos: {},
+    // se o horário já passou ao cadastrar, não avisa hoje
+    avisadoEm: h && h.hora <= agora ? iso() : null
+  });
+  return `Rotina: ${capitalizar(titulo)}${h ? ' às ' + h.hora : ''}.`;
+}
+
+function addGasto(orig) {
+  const m = orig.match(RE_NUM);
+  if (!m) return 'Diga o valor. Exemplo: gastei 45 reais no mercado.';
+  const valor = parseFloat(m[1].replace(',', '.'));
+  let desc = orig.replace(m[1], ' ')
+    .replace(/\b(gastei|gasto|gastar|paguei|pagamos|pagar|comprei|despesa|reais|real)\b/gi, ' ')
+    .replace(/\br\$/gi, ' ')
+    .replace(/\s+/g, ' ').trim()
+    .replace(/^(com|no|na|em|de|do|da|pra|para)\s+/i, '').trim();
+  desc = capitalizar(desc || 'Sem descrição');
+  const n = norm(desc);
+  const cat = Object.keys(CATS).find(c => CATS[c].test(n)) || 'Outros';
+  db.gastos.push({ id: uid(), valor, desc, cat, data: iso() });
+  return `Anotado: ${fmtR(valor)} em ${desc} (${cat}).`;
+}
+
+function criarMeta(orig) {
+  const m = orig.match(RE_NUM);
+  if (!m) return 'Diga o valor da meta. Exemplo: meta viagem 5000.';
+  const alvo = parseFloat(m[1].replace(',', '.'));
+  const nome = orig.replace(m[1], ' ')
+    .replace(/\b(meta|juntar|economizar|guardar|reais|real)\b/gi, ' ')
+    .replace(/\s+/g, ' ').trim()
+    .replace(/^(para|pra|de)\s+/i, '').trim();
+  const nomeFinal = capitalizar(nome || 'Meta');
+  db.metas.push({ id: uid(), nome: nomeFinal, alvo, atual: 0 });
+  return `Meta criada: ${nomeFinal}, ${fmtR(alvo)}.`;
+}
+
+function progressoMeta(orig) {
+  const m = orig.match(RE_NUM);
+  if (!m) return 'Diga o valor. Exemplo: adiciona 200 na meta viagem.';
+  const valor = parseFloat(m[1].replace(',', '.'));
+  const n = norm(orig);
+  // acha a meta pela primeira palavra do nome que aparece no comando ("guardei 100 no carro" -> "O carro")
+  const achaPorNome = g => norm(g.nome).split(/\s+/)
+    .filter(w => w.length >= 3 && w !== 'meta')
+    .some(w => new RegExp('\\b' + w + '\\b').test(n));
+  const meta = db.metas.find(achaPorNome) || (db.metas.length === 1 ? db.metas[0] : null);
+  if (!meta) return db.metas.length ? 'Não achei essa meta. Diga o nome dela.' : 'Você ainda não tem metas. Diga "meta" e o valor.';
+  meta.atual += valor;
+  return `${meta.nome}: ${fmtR(meta.atual)} de ${fmtR(meta.alvo)} (${pct(meta)}%).`;
+}
+
+function totalMes() {
+  const mes = iso().slice(0, 7);
+  return db.gastos.filter(g => g.data.startsWith(mes)).reduce((s, g) => s + g.valor, 0);
+}
+
+function resumo() {
+  const hoje = iso();
+  const compsHoje = db.compromissos.filter(c => c.data === hoje);
+  const pend = db.rotina.filter(r => !r.feitos[hoje]).length;
+  const partes = [`Gastos do mês: ${fmtR(totalMes())}.`];
+  partes.push(compsHoje.length ? `Hoje: ${compsHoje.map(c => c.titulo).join(', ')}.` : 'Nenhum compromisso hoje.');
+  partes.push(pend === 0 ? 'Rotina em dia.' : pend === 1 ? 'Falta 1 item da rotina.' : `Faltam ${pend} itens da rotina.`);
+  if (db.metas.length) partes.push('Metas: ' + db.metas.map(m => `${m.nome} ${pct(m)}%`).join(', ') + '.');
+  return partes.join(' ');
+}
+
+function interpretar(orig) {
+  const n = norm(orig).trim();
+  if (!n) return 'Não ouvi nada. Tente de novo.';
+  if (/\b(quanto|mostra|mostrar|lista|listar|resumo|o que tenho|quais)\b/.test(n) && !/\d/.test(n)) return resumo();
+  if (/\b(adiciona|adicionar|guardei|guarda|coloquei|poupei|depositei|soma|somar)\b/.test(n) && (/\bmeta\b/.test(n) || db.metas.length)) return progressoMeta(orig);
+  if (/\bmeta\b/.test(n)) return criarMeta(orig);
+  if (/\brotina\b/.test(n)) return addRotina(orig);
+  if (/\b(gastei|gasto|gastar|paguei|pagamos|comprei|despesa)\b/.test(n)) return addGasto(orig);
+  if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return addCompromisso(orig);
+  return 'Não entendi. Diga, por exemplo: gastei 45 reais no mercado, me lembra de ir ao médico amanhã às 15h, rotina tomar remédio às 8h, meta viagem 5000, ou quanto gastei.';
+}
+
+/* ---------- voz e resposta ---------- */
+function responder(t) { $('#resp').textContent = t; }
+function falar(t) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t);
+  u.lang = 'pt-BR';
+  speechSynthesis.speak(u);
+}
+function processar(txt) {
+  const r = interpretar(txt);
+  salvar(); render(); responder(r); falar(r);
+}
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+function ouvir() {
+  if (!SR) { responder('Seu navegador não tem comando de voz. Use o Chrome (celular Android ou PC). Por enquanto, digite abaixo.'); return; }
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  if (!rec) {
+    rec = new SR();
+    rec.lang = 'pt-BR';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = e => { const txt = e.results[0][0].transcript; responder('Ouvi: “' + txt + '”'); processar(txt); };
+    rec.onerror = e => responder('Não ouvi direito (' + e.error + '). Tente de novo ou digite.');
+    rec.onend = () => $('#mic').classList.remove('ouvindo');
+  }
+  $('#mic').classList.add('ouvindo');
+  try { rec.start(); } catch (e) { $('#mic').classList.remove('ouvindo'); }
+}
+
+/* ---------- lembretes (enquanto o app estiver aberto) ---------- */
+function avisar(msg) {
+  responder('🔔 ' + msg);
+  falar(msg);
+  if ('Notification' in window && Notification.permission === 'granted') new Notification('Nossa Rotina', { body: msg });
+}
+function checarLembretes() {
+  const agora = new Date();
+  const hj = iso(agora);
+  const hhmm = agora.toTimeString().slice(0, 5);
+  let mudou = false;
+  db.compromissos.forEach(c => {
+    if (c.avisado) return;
+    const quando = new Date(c.data + 'T' + (c.hora || '08:00') + ':00');
+    if (quando <= agora) { c.avisado = true; mudou = true; avisar('Lembrete: ' + c.titulo + (c.hora ? ' às ' + c.hora : '')); }
+  });
+  db.rotina.forEach(r => {
+    if (!r.hora || r.avisadoEm === hj || r.hora > hhmm) return;
+    r.avisadoEm = hj; mudou = true; avisar('Rotina: ' + r.titulo);
+  });
+  if (mudou) { salvar(); render(); }
+}
+
+/* ---------- telas ---------- */
+let aba = 'hoje';
+const itemComp = c => `
+  <div class="card row">
+    <div class="grow"><b>${esc(c.titulo)}</b>
+      <div class="mut">${c.data === iso() ? 'Hoje' : brData(c.data)}${c.hora ? ' · ' + c.hora : ''}</div></div>
+    <button class="del" data-act="del" data-k="compromissos" data-id="${c.id}">✕</button>
+  </div>`;
+const itemRot = (r, dia) => `
+  <div class="card row">
+    <button class="ck" data-act="rot" data-id="${r.id}">${r.feitos[dia] ? '✅' : '⬜'}</button>
+    <div class="grow" style="${r.feitos[dia] ? 'text-decoration:line-through;opacity:.6' : ''}">
+      <b>${esc(r.titulo)}</b>${r.hora ? `<div class="mut">${r.hora}</div>` : ''}</div>
+    <button class="del" data-act="del" data-k="rotina" data-id="${r.id}">✕</button>
+  </div>`;
+const itemMeta = m => `
+  <div class="card">
+    <div class="row">
+      <div class="grow"><b>${esc(m.nome)}</b>
+        <div class="mut">${fmtR(m.atual)} de ${fmtR(m.alvo)} · ${pct(m)}%</div></div>
+      <button class="del" data-act="del" data-k="metas" data-id="${m.id}">✕</button>
+    </div>
+    <div class="bar" style="margin-top:8px"><i style="width:${pct(m)}%"></i></div>
+  </div>`;
+const ordenarPorHora = (a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99');
+
+function viewHoje() {
+  const hoje = iso();
+  const comps = db.compromissos.filter(c => c.data >= hoje)
+    .sort((a, b) => (a.data + (a.hora || '99')).localeCompare(b.data + (b.hora || '99')));
+  return `
+    <h3>Compromissos</h3>
+    ${comps.slice(0, 8).map(itemComp).join('') || '<div class="card mut">Nenhum compromisso. Diga "me lembra de..."</div>'}
+    <h3>Rotina de hoje</h3>
+    ${db.rotina.slice().sort(ordenarPorHora).map(r => itemRot(r, hoje)).join('') || '<div class="card mut">Rotina vazia. Diga "rotina..."</div>'}
+    <h3>Gastos do mês</h3>
+    <div class="card"><div class="big">${fmtR(totalMes())}</div></div>
+    <h3>Metas</h3>
+    ${db.metas.map(itemMeta).join('') || '<div class="card mut">Nenhuma meta. Diga "meta viagem 5000"</div>'}`;
+}
+
+function viewGastos() {
+  const mes = iso().slice(0, 7);
+  const lista = db.gastos.filter(g => g.data.startsWith(mes)).sort((a, b) => b.data.localeCompare(a.data));
+  const total = lista.reduce((s, g) => s + g.valor, 0);
+  const porCat = {};
+  lista.forEach(g => { porCat[g.cat] = (porCat[g.cat] || 0) + g.valor; });
+  const cats = Object.entries(porCat).sort((a, b) => b[1] - a[1]);
+  const nomeMes = new Date().toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+  return `
+    <div class="card"><div class="mut">Gastos de ${esc(nomeMes)}</div><div class="big">${fmtR(total)}</div></div>
+    <h3>Por categoria</h3>
+    ${cats.map(([c, v]) => `
+      <div class="card">
+        <div class="row"><div class="grow">${esc(c)}</div><b>${fmtR(v)}</b></div>
+        <div class="bar" style="margin-top:6px"><i style="width:${total ? Math.round(v / total * 100) : 0}%"></i></div>
+      </div>`).join('') || '<div class="card mut">Nenhum gasto neste mês.</div>'}
+    <h3>Lançamentos</h3>
+    ${lista.map(g => `
+      <div class="card row">
+        <div class="grow"><b>${esc(g.desc)}</b><div class="mut">${brData(g.data)} · ${esc(g.cat)}</div></div>
+        <b>${fmtR(g.valor)}</b>
+        <button class="del" data-act="del" data-k="gastos" data-id="${g.id}">✕</button>
+      </div>`).join('')}`;
+}
+
+function viewRotina() {
+  const hoje = iso();
+  return `
+    <h3>Rotina diária (${brData(hoje)})</h3>
+    ${db.rotina.slice().sort(ordenarPorHora).map(r => itemRot(r, hoje)).join('') || '<div class="card mut">Rotina vazia. Diga "rotina tomar remédio às 8h"</div>'}
+    <div class="mut" style="margin:10px 4px">Toque no quadradinho para marcar como feito hoje. Amanhã tudo volta a começar desmarcado.</div>`;
+}
+
+function viewMetas() {
+  return `<h3>Metas</h3>
+    ${db.metas.map(itemMeta).join('') || '<div class="card mut">Nenhuma meta. Diga "meta viagem 5000"</div>'}
+    <div class="mut" style="margin:10px 4px">Diga "adiciona 200 na meta viagem" para somar.</div>`;
+}
+
+function render() {
+  document.querySelectorAll('#abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba));
+  const telas = { hoje: viewHoje, gastos: viewGastos, rotina: viewRotina, metas: viewMetas };
+  $('#view').innerHTML = telas[aba]();
+}
+
+/* ---------- eventos ---------- */
+$('#abas').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  aba = b.dataset.aba;
+  render();
+});
+$('#view').addEventListener('click', e => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const id = b.dataset.id;
+  if (b.dataset.act === 'del') {
+    if (!confirm('Apagar este item?')) return;
+    db[b.dataset.k] = db[b.dataset.k].filter(x => x.id !== id);
+  } else if (b.dataset.act === 'rot') {
+    const r = db.rotina.find(x => x.id === id);
+    const hj = iso();
+    if (r) { if (r.feitos[hj]) delete r.feitos[hj]; else r.feitos[hj] = true; }
+  }
+  salvar(); render();
+});
+$('#mic').addEventListener('click', ouvir);
+$('#form').addEventListener('submit', e => {
+  e.preventDefault();
+  const t = $('#txt').value.trim();
+  if (!t) return;
+  $('#txt').value = '';
+  responder('Você disse: “' + t + '”');
+  processar(t);
+});
+
+$('#loginForm').addEventListener('submit', e => {
+  e.preventDefault();
+  $('#loginMsg').textContent = 'Entrando...';
+  auth.signInWithEmailAndPassword($('#email').value.trim(), $('#senha').value)
+    .catch(() => { $('#loginMsg').textContent = 'E-mail ou senha incorretos.'; });
+});
+auth.onAuthStateChanged(user => {
+  if (user && EMAILS_PERMITIDOS.includes(user.email)) {
+    $('#login').style.display = 'none';
+    if (!window._sync) { window._sync = true; iniciarSync(); }
+  } else {
+    if (user) auth.signOut();
+    $('#login').style.display = 'flex';
+  }
+});
+render();
+</script>
+</body>
+</html>
