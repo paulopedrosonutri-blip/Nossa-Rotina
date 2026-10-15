@@ -384,6 +384,49 @@ function viewGastos() {
       </div>`).join('')}`;
 }
 
+// Relatório: gastos por mês e por centro de custo (no app, centro de custo = categoria)
+function dadosRelatorio() {
+  const meses = [...new Set(db.gastos.map(g => g.data.slice(0, 7)))].sort();
+  const cats = [...new Set(db.gastos.map(g => g.cat))].sort();
+  const valor = (m, c) => db.gastos.filter(g => g.data.startsWith(m) && g.cat === c).reduce((s, g) => s + g.valor, 0);
+  return { meses, cats, valor };
+}
+function relatorioGastos() {
+  const { meses, cats, valor } = dadosRelatorio();
+  if (!meses.length) return '';
+  const linhas = meses.map(m => {
+    const tot = cats.reduce((s, c) => s + valor(m, c), 0);
+    return `<tr><td>${brMes(m)}</td>${cats.map(c => `<td>${valor(m, c) ? fmtR(valor(m, c)) : '-'}</td>`).join('')}<td><b>${fmtR(tot)}</b></td></tr>`;
+  }).join('');
+  return `
+    <h3>Relatório: gastos por mês e centro de custo</h3>
+    <div class="card" style="overflow-x:auto">
+      <table style="border-collapse:collapse;font-size:14px;white-space:nowrap">
+        <tr><th style="text-align:left;padding:4px 8px">Mês</th>${cats.map(c => `<th style="text-align:right;padding:4px 8px">${esc(c)}</th>`).join('')}<th style="text-align:right;padding:4px 8px">Total</th></tr>
+        ${linhas}
+      </table>
+    </div>
+    <button data-act="csv" style="width:100%;padding:12px;border:0;border-radius:12px;background:var(--pri);color:#fff;font-size:16px">Baixar planilha (Excel)</button>`;
+}
+function brMes(m) {
+  const [ano, mes] = m.split('-');
+  return `${mes}/${ano}`;
+}
+function baixarCSV() {
+  const { meses, cats, valor } = dadosRelatorio();
+  const num = v => v.toFixed(2).replace('.', ',');
+  const linhas = [['Mês', ...cats, 'Total'].join(';')];
+  meses.forEach(m => {
+    const tot = cats.reduce((s, c) => s + valor(m, c), 0);
+    linhas.push([brMes(m), ...cats.map(c => num(valor(m, c))), num(tot)].join(';'));
+  });
+  const blob = new Blob(['﻿' + linhas.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'gastos-por-mes-e-centro-de-custo.csv';
+  a.click();
+}
+
 function viewRotina() {
   const hoje = iso();
   return `
@@ -401,7 +444,7 @@ function viewMetas() {
 function render() {
   document.querySelectorAll('#abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba));
   const telas = { hoje: viewHoje, gastos: viewGastos, rotina: viewRotina, metas: viewMetas };
-  $('#view').innerHTML = telas[aba]();
+  $('#view').innerHTML = telas[aba]() + (aba === 'gastos' ? relatorioGastos() : '');
 }
 
 /* ---------- eventos ---------- */
@@ -415,6 +458,7 @@ $('#view').addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const id = b.dataset.id;
+  if (b.dataset.act === 'csv') { baixarCSV(); return; }
   if (b.dataset.act === 'del') {
     if (!confirm('Apagar este item?')) return;
     db[b.dataset.k] = db[b.dataset.k].filter(x => x.id !== id);
