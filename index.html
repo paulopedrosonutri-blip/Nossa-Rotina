@@ -26,10 +26,12 @@ main{padding:12px}
 .mut{color:var(--mut);font-size:14px}
 .big{font-size:26px;font-weight:700}
 .del{background:none;border:0;color:var(--warn);font-size:18px;padding:4px}
+.ed{background:none;border:0;font-size:18px;padding:4px}
 .ck{font-size:22px;background:none;border:0;padding:0}
 h3{margin:16px 4px 6px;font-size:13px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
 .bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden}
 .bar i{display:block;height:100%;background:var(--pri)}
+.btnPri{width:100%;padding:12px;border:0;border-radius:12px;background:var(--pri);color:#fff;font-size:16px;margin-top:8px}
 #dock{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:50px 12px 14px}
 #mic{position:absolute;left:50%;top:-36px;transform:translateX(-50%);width:72px;height:72px;border-radius:50%;border:0;background:var(--pri);color:#fff;font-size:30px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 #mic.ouvindo{background:var(--warn);animation:pulso 1s infinite}
@@ -71,7 +73,7 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
   </form>
   <div class="ex">
     "me lembra de ir ao médico amanhã às 15h" · "rotina tomar remédio às 8h"<br>
-    "meta viagem 5000" · "adiciona 200 na meta viagem" · "quanto gastei esse mês"
+    "meta viagem 5000 até 31/12" · "adiciona 200 na meta viagem" · "quanto gastei esse mês"
   </div>
 </div>
 
@@ -87,9 +89,11 @@ const fmtR = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', cu
 const iso = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const addDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return iso(x); };
 const brData = s => s.split('-').reverse().join('/');
+const brMes = m => { const [ano, mes] = m.split('-'); return `${mes}/${ano}`; };
 const capitalizar = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const pct = m => m.alvo > 0 ? Math.min(100, Math.round(m.atual / m.alvo * 100)) : 0;
+const diasAte = p => Math.ceil((new Date(p + 'T00:00:00') - new Date(iso() + 'T00:00:00')) / 86400000);
 const DIAS = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
 const CATS = {
   'Mercado': /mercad|supermerc|feira|padaria|acougue/,
@@ -102,6 +106,7 @@ const CATS = {
 const RE_HORA = /(?:(?<!\p{L})(?:às|as|a)\s+)?\d{1,2}(?::|h)(?:\d{2})?\b/iu;
 const RE_DATA = /depois de amanh[aã]|amanh[aã]|\bhoje\b|\b(segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(-feira)?\b/i;
 const RE_NUM = /(\d+(?:[.,]\d{1,2})?)/;
+const RE_PRAZO = /at[ée]\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?|(?:por|em)\s+(\d+)\s+meses?/i;
 
 /* ---------- armazenamento na nuvem (Firebase) ---------- */
 const FIREBASE_CONFIG = {
@@ -119,6 +124,8 @@ const auth = firebase.auth();
 const docRef = firebase.firestore().collection('familia').doc('dados');
 let db = { compromissos: [], gastos: [], rotina: [], metas: [] };
 let pronto = false; // só grava depois de ler a nuvem, para nunca apagar dados por engano
+let relDe = iso().slice(0, 4) + '-01'; // período do relatório (mês inicial)
+let relAte = iso().slice(0, 4) + '-12'; // período do relatório (mês final)
 function salvar() {
   if (!pronto) return;
   docRef.set(db).catch(() => responder('⚠️ Não consegui salvar agora. Verifique a internet.'));
@@ -160,6 +167,17 @@ function extrairData(s) {
   }
   return iso(hoje);
 }
+// prazo da meta: "até 31/12", "até 31/12/2027" ou "por 6 meses"
+function extrairPrazo(s) {
+  const m = s.match(RE_PRAZO);
+  if (!m) return { prazo: null, trecho: '' };
+  if (m[4]) { const d = new Date(); d.setMonth(d.getMonth() + +m[4]); return { prazo: iso(d), trecho: m[0] }; }
+  const hoje = new Date();
+  const ano = m[3] ? +m[3] : hoje.getFullYear();
+  let d = new Date(ano, +m[2] - 1, +m[1]);
+  if (!m[3] && d < hoje) d = new Date(ano + 1, +m[2] - 1, +m[1]);
+  return { prazo: iso(d), trecho: m[0] };
+}
 // tira do texto original as palavras de comando, data e hora, sobrando o título
 function limpar(s) {
   return s
@@ -174,7 +192,7 @@ function addCompromisso(orig) {
   const data = extrairData(orig);
   const titulo = limpar(orig);
   if (!titulo) return 'Diga o compromisso. Exemplo: me lembra de ir ao médico amanhã às 15h.';
-  db.compromissos.push({ id: uid(), titulo: capitalizar(titulo), data, hora: h ? h.hora : null, avisado: false });
+  db.compromissos.push({ id: uid(), titulo: capitalizar(titulo), data, hora: h ? h.hora : null, avisado: false, avisadoAntes: false });
   return `Anotado: ${capitalizar(titulo)}, ${data === iso() ? 'hoje' : brData(data)}${h ? ' às ' + h.hora : ''}.`;
 }
 
@@ -208,16 +226,18 @@ function addGasto(orig) {
 }
 
 function criarMeta(orig) {
-  const m = orig.match(RE_NUM);
-  if (!m) return 'Diga o valor da meta. Exemplo: meta viagem 5000.';
+  const p = extrairPrazo(orig);
+  const texto = orig.replace(p.trecho, ' ');
+  const m = texto.match(RE_NUM);
+  if (!m) return 'Diga o valor da meta. Exemplo: meta viagem 5000 até 31/12.';
   const alvo = parseFloat(m[1].replace(',', '.'));
-  const nome = orig.replace(m[1], ' ')
+  const nome = texto.replace(m[1], ' ')
     .replace(/\b(meta|juntar|economizar|guardar|reais|real)\b/gi, ' ')
     .replace(/\s+/g, ' ').trim()
     .replace(/^(para|pra|de)\s+/i, '').trim();
   const nomeFinal = capitalizar(nome || 'Meta');
-  db.metas.push({ id: uid(), nome: nomeFinal, alvo, atual: 0 });
-  return `Meta criada: ${nomeFinal}, ${fmtR(alvo)}.`;
+  db.metas.push({ id: uid(), nome: nomeFinal, alvo, atual: 0, inicio: iso(), prazo: p.prazo, aportes: [], avisadoMetaEm: null });
+  return `Meta criada: ${nomeFinal}, ${fmtR(alvo)}${p.prazo ? ', até ' + brData(p.prazo) : ''}.`;
 }
 
 function progressoMeta(orig) {
@@ -232,6 +252,7 @@ function progressoMeta(orig) {
   const meta = db.metas.find(achaPorNome) || (db.metas.length === 1 ? db.metas[0] : null);
   if (!meta) return db.metas.length ? 'Não achei essa meta. Diga o nome dela.' : 'Você ainda não tem metas. Diga "meta" e o valor.';
   meta.atual += valor;
+  (meta.aportes = meta.aportes || []).push({ id: uid(), valor, data: iso() });
   return `${meta.nome}: ${fmtR(meta.atual)} de ${fmtR(meta.alvo)} (${pct(meta)}%).`;
 }
 
@@ -260,7 +281,7 @@ function interpretar(orig) {
   if (/\brotina\b/.test(n)) return addRotina(orig);
   if (/\b(gastei|gasto|gastar|paguei|pagamos|comprei|despesa)\b/.test(n)) return addGasto(orig);
   if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return addCompromisso(orig);
-  return 'Não entendi. Diga, por exemplo: gastei 45 reais no mercado, me lembra de ir ao médico amanhã às 15h, rotina tomar remédio às 8h, meta viagem 5000, ou quanto gastei.';
+  return 'Não entendi. Diga, por exemplo: gastei 45 reais no mercado, me lembra de ir ao médico amanhã às 15h, rotina tomar remédio às 8h, meta viagem 5000 até 31/12, ou quanto gastei.';
 }
 
 /* ---------- voz e resposta ---------- */
@@ -307,38 +328,98 @@ function checarLembretes() {
   const hhmm = agora.toTimeString().slice(0, 5);
   let mudou = false;
   db.compromissos.forEach(c => {
-    if (c.avisado) return;
     const quando = new Date(c.data + 'T' + (c.hora || '08:00') + ':00');
-    if (quando <= agora) { c.avisado = true; mudou = true; avisar('Lembrete: ' + c.titulo + (c.hora ? ' às ' + c.hora : '')); }
+    const faltam = quando - agora;
+    // aviso 30 minutos antes (só quando tem horário)
+    if (c.hora && !c.avisadoAntes && faltam > 0 && faltam <= 30 * 60000) {
+      c.avisadoAntes = true; mudou = true;
+      avisar('Em 30 minutos: ' + c.titulo + ' às ' + c.hora);
+    }
+    // aviso na hora
+    if (!c.avisado && quando <= agora) {
+      c.avisado = true; mudou = true;
+      avisar('Agora: ' + c.titulo + (c.hora ? ' às ' + c.hora : ''));
+    }
   });
   db.rotina.forEach(r => {
     if (!r.hora || r.avisadoEm === hj || r.hora > hhmm) return;
     r.avisadoEm = hj; mudou = true; avisar('Rotina: ' + r.titulo);
   });
+  // avisa todo dia, a partir das 9h, o percentual de cada meta
+  if (agora.getHours() >= 9) {
+    const linhas = [];
+    db.metas.forEach(m => {
+      if (m.avisadoMetaEm === hj) return;
+      m.avisadoMetaEm = hj; mudou = true;
+      linhas.push(`${m.nome}: ${pct(m)}% (${fmtR(m.atual)} de ${fmtR(m.alvo)})${m.prazo ? ', faltam ' + diasAte(m.prazo) + ' dias' : ''}`);
+    });
+    if (linhas.length) avisar('Metas de hoje. ' + linhas.join('. ') + '.');
+  }
   if (mudou) { salvar(); render(); }
+}
+
+/* ---------- editar e apagar ---------- */
+function editar(k, id) {
+  const it = db[k].find(x => x.id === id);
+  if (!it) return;
+  if (k === 'compromissos') {
+    const t = prompt('Compromisso:', it.titulo); if (t === null) return;
+    const d = prompt('Data (AAAA-MM-DD):', it.data); if (d === null) return;
+    const h = prompt('Hora (HH:MM). Deixe vazio para o dia todo:', it.hora || ''); if (h === null) return;
+    it.titulo = capitalizar(t.trim() || it.titulo);
+    it.data = /^\d{4}-\d{2}-\d{2}$/.test(d.trim()) ? d.trim() : it.data;
+    it.hora = /^\d{2}:\d{2}$/.test(h.trim()) ? h.trim() : null;
+    it.avisado = false; it.avisadoAntes = false;
+  } else if (k === 'rotina') {
+    const t = prompt('Tarefa:', it.titulo); if (t === null) return;
+    const h = prompt('Hora (HH:MM). Deixe vazio se não tiver:', it.hora || ''); if (h === null) return;
+    it.titulo = capitalizar(t.trim() || it.titulo);
+    it.hora = /^\d{2}:\d{2}$/.test(h.trim()) ? h.trim() : null;
+    it.avisadoEm = null;
+  } else if (k === 'gastos') {
+    const d = prompt('Descrição:', it.desc); if (d === null) return;
+    const v = prompt('Valor (R$):', String(it.valor).replace('.', ',')); if (v === null) return;
+    const dt = prompt('Data (AAAA-MM-DD):', it.data); if (dt === null) return;
+    it.desc = capitalizar(d.trim() || it.desc);
+    it.valor = parseFloat(v.replace(',', '.')) || it.valor;
+    it.data = /^\d{4}-\d{2}-\d{2}$/.test(dt.trim()) ? dt.trim() : it.data;
+    const n = norm(it.desc);
+    it.cat = Object.keys(CATS).find(c => CATS[c].test(n)) || 'Outros';
+  } else if (k === 'metas') {
+    const nm = prompt('Nome da meta (centro de custo):', it.nome); if (nm === null) return;
+    const al = prompt('Valor da meta (R$):', String(it.alvo).replace('.', ',')); if (al === null) return;
+    const pz = prompt('Prazo (DD/MM/AAAA). Deixe vazio para sem prazo:', it.prazo ? brData(it.prazo) : ''); if (pz === null) return;
+    it.nome = capitalizar(nm.trim() || it.nome);
+    it.alvo = parseFloat(al.replace(',', '.')) || it.alvo;
+    const mm = pz.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    it.prazo = mm ? `${mm[3]}-${mm[2].padStart(2, '0')}-${mm[1].padStart(2, '0')}` : null;
+    it.avisadoMetaEm = null;
+  }
+  salvar();
 }
 
 /* ---------- telas ---------- */
 let aba = 'hoje';
+const botoes = (k, id) => `<button class="ed" data-act="edit" data-k="${k}" data-id="${id}">✏️</button><button class="del" data-act="del" data-k="${k}" data-id="${id}">✕</button>`;
 const itemComp = c => `
   <div class="card row">
     <div class="grow"><b>${esc(c.titulo)}</b>
       <div class="mut">${c.data === iso() ? 'Hoje' : brData(c.data)}${c.hora ? ' · ' + c.hora : ''}</div></div>
-    <button class="del" data-act="del" data-k="compromissos" data-id="${c.id}">✕</button>
+    ${botoes('compromissos', c.id)}
   </div>`;
 const itemRot = (r, dia) => `
   <div class="card row">
     <button class="ck" data-act="rot" data-id="${r.id}">${r.feitos[dia] ? '✅' : '⬜'}</button>
     <div class="grow" style="${r.feitos[dia] ? 'text-decoration:line-through;opacity:.6' : ''}">
       <b>${esc(r.titulo)}</b>${r.hora ? `<div class="mut">${r.hora}</div>` : ''}</div>
-    <button class="del" data-act="del" data-k="rotina" data-id="${r.id}">✕</button>
+    ${botoes('rotina', r.id)}
   </div>`;
 const itemMeta = m => `
   <div class="card">
     <div class="row">
       <div class="grow"><b>${esc(m.nome)}</b>
-        <div class="mut">${fmtR(m.atual)} de ${fmtR(m.alvo)} · ${pct(m)}%</div></div>
-      <button class="del" data-act="del" data-k="metas" data-id="${m.id}">✕</button>
+        <div class="mut">${fmtR(m.atual)} de ${fmtR(m.alvo)} · ${pct(m)}%${m.prazo ? ' · até ' + brData(m.prazo) + ' (faltam ' + diasAte(m.prazo) + ' dias)' : ''}</div></div>
+      ${botoes('metas', m.id)}
     </div>
     <div class="bar" style="margin-top:8px"><i style="width:${pct(m)}%"></i></div>
   </div>`;
@@ -375,56 +456,92 @@ function viewGastos() {
         <div class="row"><div class="grow">${esc(c)}</div><b>${fmtR(v)}</b></div>
         <div class="bar" style="margin-top:6px"><i style="width:${total ? Math.round(v / total * 100) : 0}%"></i></div>
       </div>`).join('') || '<div class="card mut">Nenhum gasto neste mês.</div>'}
-    <h3>Lançamentos</h3>
+    <h3>Lançamentos do mês</h3>
     ${lista.map(g => `
       <div class="card row">
         <div class="grow"><b>${esc(g.desc)}</b><div class="mut">${brData(g.data)} · ${esc(g.cat)}</div></div>
         <b>${fmtR(g.valor)}</b>
-        <button class="del" data-act="del" data-k="gastos" data-id="${g.id}">✕</button>
+        ${botoes('gastos', g.id)}
       </div>`).join('')}`;
 }
 
-// Relatório: gastos por mês e por centro de custo (no app, centro de custo = categoria)
+// Relatório: gastos por mês e por centro de custo.
+// Centro de custo = categoria dos gastos, e cada meta também (aportes que você registrou nela).
 function dadosRelatorio() {
-  const meses = [...new Set(db.gastos.map(g => g.data.slice(0, 7)))].sort();
-  const cats = [...new Set(db.gastos.map(g => g.cat))].sort();
-  const valor = (m, c) => db.gastos.filter(g => g.data.startsWith(m) && g.cat === c).reduce((s, g) => s + g.valor, 0);
-  return { meses, cats, valor };
+  const dentro = m => m >= relDe.slice(0, 7) && m <= relAte.slice(0, 7);
+  const lancs = db.gastos.map(g => ({ mes: g.data.slice(0, 7), centro: g.cat, valor: g.valor }));
+  db.metas.forEach(mt => (mt.aportes || []).forEach(a => lancs.push({ mes: a.data.slice(0, 7), centro: 'Meta: ' + mt.nome, valor: a.valor })));
+  const periodo = lancs.filter(l => dentro(l.mes));
+  const meses = [...new Set(periodo.map(l => l.mes))].sort();
+  const centros = [...new Set(periodo.map(l => l.centro))].sort();
+  const valor = (m, c) => periodo.filter(l => l.mes === m && l.centro === c).reduce((s, l) => s + l.valor, 0);
+  return { meses, centros, valor };
 }
 function relatorioGastos() {
-  const { meses, cats, valor } = dadosRelatorio();
-  if (!meses.length) return '';
+  const { meses, centros, valor } = dadosRelatorio();
+  const filtros = `
+    <h3>Relatório por mês e centro de custo</h3>
+    <div class="row" style="margin:6px 0">
+      <div class="grow"><div class="mut">De</div><input type="month" id="relDe" value="${relDe.slice(0, 7)}"></div>
+      <div class="grow"><div class="mut">Até</div><input type="month" id="relAte" value="${relAte.slice(0, 7)}"></div>
+    </div>`;
+  if (!meses.length) return filtros + '<div class="card mut">Nenhum lançamento neste período.</div>';
+  const totalCentro = c => meses.reduce((s, m) => s + valor(m, c), 0);
+  const geral = centros.reduce((s, c) => s + totalCentro(c), 0);
   const linhas = meses.map(m => {
-    const tot = cats.reduce((s, c) => s + valor(m, c), 0);
-    return `<tr><td>${brMes(m)}</td>${cats.map(c => `<td>${valor(m, c) ? fmtR(valor(m, c)) : '-'}</td>`).join('')}<td><b>${fmtR(tot)}</b></td></tr>`;
+    const tot = centros.reduce((s, c) => s + valor(m, c), 0);
+    return `<tr><td>${brMes(m)}</td>${centros.map(c => `<td>${valor(m, c) ? fmtR(valor(m, c)) : '-'}</td>`).join('')}<td><b>${fmtR(tot)}</b></td></tr>`;
   }).join('');
-  return `
-    <h3>Relatório: gastos por mês e centro de custo</h3>
+  return filtros + `
     <div class="card" style="overflow-x:auto">
       <table style="border-collapse:collapse;font-size:14px;white-space:nowrap">
-        <tr><th style="text-align:left;padding:4px 8px">Mês</th>${cats.map(c => `<th style="text-align:right;padding:4px 8px">${esc(c)}</th>`).join('')}<th style="text-align:right;padding:4px 8px">Total</th></tr>
+        <tr><th style="text-align:left;padding:4px 8px">Mês</th>${centros.map(c => `<th style="text-align:right;padding:4px 8px">${esc(c)}</th>`).join('')}<th style="text-align:right;padding:4px 8px">Total</th></tr>
         ${linhas}
+        <tr><th style="text-align:left;padding:4px 8px">Total</th>${centros.map(c => `<th style="text-align:right;padding:4px 8px">${fmtR(totalCentro(c))}</th>`).join('')}<th style="text-align:right;padding:4px 8px">${fmtR(geral)}</th></tr>
       </table>
     </div>
-    <button data-act="csv" style="width:100%;padding:12px;border:0;border-radius:12px;background:var(--pri);color:#fff;font-size:16px">Baixar planilha (Excel)</button>`;
-}
-function brMes(m) {
-  const [ano, mes] = m.split('-');
-  return `${mes}/${ano}`;
+    <button class="btnPri" data-act="pdf">Gerar PDF</button>
+    <button class="btnPri" data-act="csv" style="background:var(--ok)">Baixar planilha (Excel)</button>`;
 }
 function baixarCSV() {
-  const { meses, cats, valor } = dadosRelatorio();
+  const { meses, centros, valor } = dadosRelatorio();
   const num = v => v.toFixed(2).replace('.', ',');
-  const linhas = [['Mês', ...cats, 'Total'].join(';')];
+  const linhas = [['Mês', ...centros, 'Total'].join(';')];
   meses.forEach(m => {
-    const tot = cats.reduce((s, c) => s + valor(m, c), 0);
-    linhas.push([brMes(m), ...cats.map(c => num(valor(m, c))), num(tot)].join(';'));
+    const tot = centros.reduce((s, c) => s + valor(m, c), 0);
+    linhas.push([brMes(m), ...centros.map(c => num(valor(m, c))), num(tot)].join(';'));
   });
   const blob = new Blob(['﻿' + linhas.join('\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'gastos-por-mes-e-centro-de-custo.csv';
+  a.download = 'relatorio-gastos-por-centro-de-custo.csv';
   a.click();
+}
+function gerarPDF() {
+  const { meses, centros, valor } = dadosRelatorio();
+  if (!meses.length) { responder('Não há lançamentos neste período.'); return; }
+  const totalCentro = c => meses.reduce((s, m) => s + valor(m, c), 0);
+  const geral = centros.reduce((s, c) => s + totalCentro(c), 0);
+  const cab = centros.map(c => `<th>${esc(c)}</th>`).join('');
+  const linhas = meses.map(m => {
+    const tot = centros.reduce((s, c) => s + valor(m, c), 0);
+    return `<tr><td>${brMes(m)}</td>${centros.map(c => `<td class="n">${valor(m, c) ? fmtR(valor(m, c)) : '-'}</td>`).join('')}<td class="n"><b>${fmtR(tot)}</b></td></tr>`;
+  }).join('');
+  const totais = centros.map(c => `<th class="n">${fmtR(totalCentro(c))}</th>`).join('');
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de gastos</title>
+    <style>body{font-family:Arial,sans-serif;padding:20px}h1{font-size:20px}p{color:#555}
+    table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #999;padding:5px}
+    th{background:#eee}.n{text-align:right}</style></head><body>
+    <h1>Relatório de gastos por mês e centro de custo</h1>
+    <p>Período: ${brMes(relDe.slice(0, 7))} a ${brMes(relAte.slice(0, 7))}</p>
+    <table><tr><th>Mês</th>${cab}<th>Total</th></tr>${linhas}
+    <tr><th>Total</th>${totais}<th class="n">${fmtR(geral)}</th></tr></table>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { responder('Permita pop-ups do site para gerar o PDF.'); return; }
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 300);
 }
 
 function viewRotina() {
@@ -436,9 +553,9 @@ function viewRotina() {
 }
 
 function viewMetas() {
-  return `<h3>Metas</h3>
-    ${db.metas.map(itemMeta).join('') || '<div class="card mut">Nenhuma meta. Diga "meta viagem 5000"</div>'}
-    <div class="mut" style="margin:10px 4px">Diga "adiciona 200 na meta viagem" para somar.</div>`;
+  return `<h3>Metas (centros de custo)</h3>
+    ${db.metas.map(itemMeta).join('') || '<div class="card mut">Nenhuma meta. Diga "meta viagem 5000 até 31/12"</div>'}
+    <div class="mut" style="margin:10px 4px">Diga "adiciona 200 na meta viagem" para registrar um aporte. O aviso com o percentual sai todo dia a partir das 9h, com o app aberto.</div>`;
 }
 
 function render() {
@@ -459,6 +576,8 @@ $('#view').addEventListener('click', e => {
   if (!b) return;
   const id = b.dataset.id;
   if (b.dataset.act === 'csv') { baixarCSV(); return; }
+  if (b.dataset.act === 'pdf') { gerarPDF(); return; }
+  if (b.dataset.act === 'edit') { editar(b.dataset.k, id); render(); return; }
   if (b.dataset.act === 'del') {
     if (!confirm('Apagar este item?')) return;
     db[b.dataset.k] = db[b.dataset.k].filter(x => x.id !== id);
@@ -468,6 +587,10 @@ $('#view').addEventListener('click', e => {
     if (r) { if (r.feitos[hj]) delete r.feitos[hj]; else r.feitos[hj] = true; }
   }
   salvar(); render();
+});
+$('#view').addEventListener('change', e => {
+  if (e.target.id === 'relDe' && e.target.value) { relDe = e.target.value + '-01'; render(); }
+  if (e.target.id === 'relAte' && e.target.value) { relAte = e.target.value + '-28'; render(); }
 });
 $('#mic').addEventListener('click', ouvir);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
