@@ -182,9 +182,9 @@ function extrairPrazo(s) {
 function limpar(s) {
   return s
     .replace(RE_HORA, ' ').replace(RE_DATA, ' ')
-    .replace(/\b(me lembra de|me lembra|me lembrar de|lembrete|lembrar de|lembrar|agendar|agenda|anotar|anota|compromisso|rotina|reais|real)\b/gi, ' ')
+    .replace(/\b(me lembra de|me lembra|me lembrar de|lembrete|lembrar de|lembrar|agendar|agenda|anotar|anota|adiciona|adicionar|compromisso|rotina|reais|real)\b/gi, ' ')
     .replace(/\s+/g, ' ').replace(/^[\s:,\-]+|[\s,.:]+$/g, '')
-    .replace(/^de /i, '').trim();
+    .replace(/^de /i, '').replace(/\s+(na|no|em|pra|para)$/i, '').trim();
 }
 
 function addCompromisso(orig) {
@@ -276,9 +276,10 @@ function interpretar(orig) {
   const n = norm(orig).trim();
   if (!n) return 'Não ouvi nada. Tente de novo.';
   if (/\b(quanto|mostra|mostrar|lista|listar|resumo|o que tenho|quais)\b/.test(n) && !/\d/.test(n)) return resumo();
+  // rotina vem antes: "adiciona ... na rotina" não é aporte de meta
+  if (/\brotina\b/.test(n)) return addRotina(orig);
   if (/\b(adiciona|adicionar|guardei|guarda|coloquei|poupei|depositei|soma|somar)\b/.test(n) && (/\bmeta\b/.test(n) || db.metas.length)) return progressoMeta(orig);
   if (/\bmeta\b/.test(n)) return criarMeta(orig);
-  if (/\brotina\b/.test(n)) return addRotina(orig);
   if (/\b(gastei|gasto|gastar|paguei|pagamos|comprei|despesa)\b/.test(n)) return addGasto(orig);
   if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return addCompromisso(orig);
   return 'Não entendi. Diga, por exemplo: gastei 45 reais no mercado, me lembra de ir ao médico amanhã às 15h, rotina tomar remédio às 8h, meta viagem 5000 até 31/12, ou quanto gastei.';
