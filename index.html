@@ -93,7 +93,7 @@ const addDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const brData = s => s.split('-').reverse().join('/');
 const brMes = m => { const [ano, mes] = m.split('-'); return `${mes}/${ano}`; };
 const capitalizar = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-const norm = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const pct = m => m.alvo > 0 ? Math.min(100, Math.round(m.atual / m.alvo * 100)) : 0;
 const diasAte = p => Math.ceil((new Date(p + 'T00:00:00') - new Date(iso() + 'T00:00:00')) / 86400000);
 const DIAS = ['domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta', 'sabado'];
@@ -123,13 +123,14 @@ const FIREBASE_CONFIG = {
 const EMAILS_PERMITIDOS = ['paulopedrosonutri@gmail.com', 'vanessaccarvalhopedroso@hotmail.com'];
 firebase.initializeApp(FIREBASE_CONFIG);
 const auth = firebase.auth();
-const docRef = firebase.firestore().collection('familia').doc('dados');
+// cada pessoa tem a sua base: o Paulo mantém os dados que já existem, a Vanessa começa do zero
+let docRef = null;
 let db = { compromissos: [], gastos: [], rotina: [], metas: [] };
 let pronto = false; // só grava depois de ler a nuvem, para nunca apagar dados por engano
 let relDe = iso().slice(0, 4) + '-01'; // período do relatório (mês inicial)
 let relAte = iso().slice(0, 4) + '-12'; // período do relatório (mês final)
 function salvar() {
-  if (!pronto) return;
+  if (!pronto || !docRef) return;
   docRef.set(db).catch(() => responder('⚠️ Não consegui salvar agora. Verifique a internet.'));
 }
 function iniciarSync() {
@@ -630,7 +631,11 @@ $('#loginForm').addEventListener('submit', e => {
 auth.onAuthStateChanged(user => {
   if (user && EMAILS_PERMITIDOS.includes(user.email)) {
     $('#login').style.display = 'none';
-    if (!window._sync) { window._sync = true; iniciarSync(); }
+    if (!window._sync) {
+      window._sync = true;
+      docRef = firebase.firestore().collection('familia').doc(user.email === EMAILS_PERMITIDOS[0] ? 'dados' : 'vanessa');
+      iniciarSync();
+    }
   } else {
     if (user) auth.signOut();
     $('#login').style.display = 'flex';
