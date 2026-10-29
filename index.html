@@ -55,7 +55,7 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
     <div id="loginMsg" class="mut" style="margin-top:10px"></div>
   </div>
 </div>
-<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 h</small>
+<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 i</small>
   <button id="avisosBtn" style="display:none;float:right;margin-left:6px;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--warn);color:#fff">🔔 Ativar avisos</button>
   <button id="atualizar" style="float:right;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff">🔄 Atualizar</button>
 </header>
@@ -215,6 +215,8 @@ function addCompromisso(orig) {
   let data = extrairData(orig);
   const titulo = limpar(orig);
   if (!titulo) return 'Diga o compromisso. Exemplo: me lembra de ir ao médico amanhã às 15h.';
+  // sem dia no texto: usa o dia tocado no calendário da Agenda
+  if (!data && aba === 'agenda' && calTocado && calDia >= iso()) data = calDia;
   // dia e horário são obrigatórios: pergunta até ter os dois
   while (!data) {
     const resp = prompt(`Que dia é "${capitalizar(titulo)}"? (ex: hoje, amanhã, sexta, 15/11)`);
@@ -455,6 +457,7 @@ function editar(k, id) {
 let aba = 'agenda';
 let calMes = iso().slice(0, 7); // mês mostrado no calendário (AAAA-MM)
 let calDia = iso();             // dia escolhido no calendário
+let calTocado = false;          // true depois que a pessoa toca num dia
 const botoes = (k, id) => `<button class="ed" data-act="edit" data-k="${k}" data-id="${id}">✏️</button><button class="del" data-act="del" data-k="${k}" data-id="${id}">✕</button>`;
 const itemComp = c => `
   <div class="card row">
@@ -658,7 +661,7 @@ $('#view').addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const id = b.dataset.id;
-  if (b.dataset.act === 'dia') { calDia = id; render(); return; }
+  if (b.dataset.act === 'dia') { calDia = id; calTocado = true; render(); return; }
   if (b.dataset.act === 'mes') {
     const [a, m] = calMes.split('-').map(Number);
     calMes = iso(new Date(a, m - 1 + Number(id), 1)).slice(0, 7);
