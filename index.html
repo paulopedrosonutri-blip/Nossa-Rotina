@@ -55,7 +55,8 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
     <div id="loginMsg" class="mut" style="margin-top:10px"></div>
   </div>
 </div>
-<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 f</small>
+<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 g</small>
+  <button id="avisosBtn" style="display:none;float:right;margin-left:6px;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--warn);color:#fff">🔔 Ativar avisos</button>
   <button id="atualizar" style="float:right;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff">🔄 Atualizar</button>
 </header>
 <nav id="abas">
@@ -82,6 +83,7 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-auth-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.12.2/firebase-messaging-compat.js"></script>
 <script>
 /* ---------- utilidades ---------- */
 const $ = s => document.querySelector(s);
@@ -191,10 +193,16 @@ function limpar(s) {
 }
 
 function addCompromisso(orig) {
-  const h = extrairHora(orig.replace(RE_DATA, ' '));
+  let h = extrairHora(orig.replace(RE_DATA, ' '));
   const data = extrairData(orig);
   const titulo = limpar(orig);
   if (!titulo) return 'Diga o compromisso. Exemplo: me lembra de ir ao médico amanhã às 15h.';
+  // sem horário não dá para avisar: pergunta até ter um
+  while (!h) {
+    const resp = prompt(`Que horas é "${capitalizar(titulo)}"? (ex: 15h ou 15:30)`);
+    if (resp === null) return 'Compromisso não anotado: faltou o horário.';
+    h = extrairHora(resp.trim().replace(/^(\d{1,2})$/, '$1h'));
+  }
   db.compromissos.push({ id: uid(), titulo: capitalizar(titulo), data, hora: h ? h.hora : null, avisado: false, avisadoAntes: false });
   return `Anotado: ${capitalizar(titulo)}, ${data === iso() ? 'hoje' : brData(data)}${h ? ' às ' + h.hora : ''}.`;
 }
@@ -627,7 +635,34 @@ $('#atualizar').addEventListener('click', async () => {
   location.href = location.pathname + '?v=' + Date.now();
 });
 $('#mic').addEventListener('click', ouvir);
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+const swPronto = 'serviceWorker' in navigator ? navigator.serviceWorker.register('sw.js') : null;
+
+/* ---------- avisos com o app fechado (notificação pela nuvem) ---------- */
+const VAPID_KEY = 'BL00JGGWeigHGTxJ-bbzTU6qYl61dfP2RSnIaLHxLyymH8w_SRnrecKurQAvrJa5OBeKBr8WbXXpIT5nh28vKT8';
+async function registrarAvisos(pedir) {
+  const btn = $('#avisosBtn');
+  try {
+    if (!VAPID_KEY || !swPronto || !('Notification' in window) || !firebase.messaging.isSupported()) return;
+    if (Notification.permission !== 'granted') {
+      if (!pedir) { btn.style.display = ''; return; }
+      if (await Notification.requestPermission() !== 'granted') {
+        btn.style.display = '';
+        responder('Avisos bloqueados. Libere as notificações do site no Chrome.');
+        return;
+      }
+    }
+    const token = await firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: await swPronto });
+    if (!token) return;
+    await firebase.firestore().collection('tokens').doc(auth.currentUser.email)
+      .set({ lista: firebase.firestore.FieldValue.arrayUnion(token) }, { merge: true });
+    btn.style.display = 'none';
+    if (pedir) responder('🔔 Avisos ativados: você recebe mesmo com o app fechado.');
+  } catch (e) {
+    btn.style.display = '';
+    if (pedir) responder('Não consegui ativar os avisos: ' + e.message);
+  }
+}
+$('#avisosBtn').addEventListener('click', () => registrarAvisos(true));
 $('#form').addEventListener('submit', e => {
   e.preventDefault();
   const t = $('#txt').value.trim();
@@ -650,6 +685,7 @@ auth.onAuthStateChanged(user => {
       window._sync = true;
       docRef = firebase.firestore().collection('familia').doc(user.email === EMAILS_PERMITIDOS[0] ? 'dados' : 'vanessa');
       iniciarSync();
+      registrarAvisos(false);
     }
   } else {
     if (user) auth.signOut();
