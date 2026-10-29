@@ -55,7 +55,7 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
     <div id="loginMsg" class="mut" style="margin-top:10px"></div>
   </div>
 </div>
-<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 e</small>
+<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 f</small>
   <button id="atualizar" style="float:right;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff">🔄 Atualizar</button>
 </header>
 <nav id="abas">
@@ -285,6 +285,11 @@ function interpretar(orig) {
   if (/\bmeta\b/.test(n)) return criarMeta(orig);
   if (/\b(gastei|gasto|gastar|paguei|pagamos|comprei|despesa)\b/.test(n)) return addGasto(orig);
   if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return addCompromisso(orig);
+  // sem palavra-chave: vale a aba aberta ("ir na cama" na aba Rotina vira rotina)
+  if (aba === 'rotina') return addRotina(orig);
+  if (aba === 'hoje') return addCompromisso(orig);
+  if (aba === 'gastos' && /\d/.test(n)) return addGasto(orig);
+  if (aba === 'metas' && /\d/.test(n)) return criarMeta(orig);
   return 'Não entendi.';
 }
 
@@ -303,7 +308,8 @@ function abaDoComando(orig) {
   if (/\brotina\b/.test(n)) return 'rotina';
   if (/\b(adiciona|adicionar|guardei|guarda|coloquei|poupei|depositei|soma|somar|meta)\b/.test(n)) return 'metas';
   if (/\b(gastei|gasto|gastar|paguei|pagamos|comprei|despesa)\b/.test(n)) return 'gastos';
-  return 'hoje';
+  if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return 'hoje';
+  return aba; // sem palavra-chave: fica na aba aberta
 }
 function processar(txt) {
   const r = interpretar(txt);
