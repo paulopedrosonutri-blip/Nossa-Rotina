@@ -55,9 +55,12 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
     <div id="loginMsg" class="mut" style="margin-top:10px"></div>
   </div>
 </div>
-<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 i</small>
-  <button id="avisosBtn" style="display:none;float:right;margin-left:6px;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--warn);color:#fff">🔔 Ativar avisos</button>
-  <button id="atualizar" style="float:right;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff">🔄 Atualizar</button>
+<header style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px">
+  <div style="flex:1 1 auto;min-width:0">🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400;white-space:nowrap">versão 2026-10-29 j</small></div>
+  <div style="display:flex;gap:6px;margin-left:auto">
+    <button id="avisosBtn" style="display:none;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--warn);color:#fff;white-space:nowrap">🔔 Ativar avisos</button>
+    <button id="atualizar" style="font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff;white-space:nowrap">🔄 Atualizar</button>
+  </div>
 </header>
 <nav id="abas">
   <button data-aba="agenda" class="on">Agenda</button>
