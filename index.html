@@ -55,12 +55,12 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
     <div id="loginMsg" class="mut" style="margin-top:10px"></div>
   </div>
 </div>
-<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 g</small>
+<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 h</small>
   <button id="avisosBtn" style="display:none;float:right;margin-left:6px;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--warn);color:#fff">🔔 Ativar avisos</button>
   <button id="atualizar" style="float:right;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff">🔄 Atualizar</button>
 </header>
 <nav id="abas">
-  <button data-aba="hoje" class="on">Hoje</button>
+  <button data-aba="agenda" class="on">Agenda</button>
   <button data-aba="gastos">Gastos</button>
   <button data-aba="rotina">Rotina</button>
   <button data-aba="metas">Metas</button>
@@ -161,16 +161,34 @@ function extrairHora(s) {
   if (h > 23 || min > 59) return null;
   return { hora: String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0') };
 }
+// data do compromisso: hoje, amanhã, dia da semana, "15/11", "15/11/2027" ou "dia 15".
+// Sem nenhuma dessas, devolve null (o app pergunta o dia).
+const RE_DIA = /\b(?:dia\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b|\bdia\s+(\d{1,2})\b/i;
 function extrairData(s) {
   const n = norm(s);
   const hoje = new Date();
+  const zero = new Date(iso() + 'T00:00:00');
   if (/depois de amanha/.test(n)) return addDias(hoje, 2);
   if (/amanha/.test(n)) return addDias(hoje, 1);
+  if (/\bhoje\b/.test(n)) return iso(hoje);
+  const m = s.match(RE_DIA);
+  if (m && m[1]) {
+    let ano = m[3] ? +m[3] : hoje.getFullYear();
+    if (ano < 100) ano += 2000;
+    let d = new Date(ano, +m[2] - 1, +m[1]);
+    if (!m[3] && d < zero) d = new Date(ano + 1, +m[2] - 1, +m[1]);
+    if (d.getDate() === +m[1]) return iso(d);
+  }
+  if (m && m[4]) {
+    let d = new Date(hoje.getFullYear(), hoje.getMonth(), +m[4]);
+    if (d < zero) d = new Date(hoje.getFullYear(), hoje.getMonth() + 1, +m[4]);
+    if (d.getDate() === +m[4]) return iso(d);
+  }
   for (let i = 0; i < 7; i++) {
     const d = new Date(); d.setDate(d.getDate() + i);
     if (new RegExp('\\b' + DIAS[d.getDay()] + '\\b').test(n)) return iso(d);
   }
-  return iso(hoje);
+  return null;
 }
 // prazo da meta: "até 31/12", "até 31/12/2027" ou "por 6 meses"
 function extrairPrazo(s) {
@@ -186,24 +204,32 @@ function extrairPrazo(s) {
 // tira do texto original as palavras de comando, data e hora, sobrando o título
 function limpar(s) {
   return s
-    .replace(RE_HORA, ' ').replace(RE_DATA, ' ')
+    .replace(RE_HORA, ' ').replace(RE_DATA, ' ').replace(RE_DIA, ' ')
     .replace(/\b(me lembra de|me lembra|me lembrar de|lembrete|lembrar de|lembrar|agendar|agenda|anotar|anota|adiciona|adicionar|compromisso|rotina|reais|real)\b/gi, ' ')
     .replace(/\s+/g, ' ').replace(/^[\s:,\-]+|[\s,.:]+$/g, '')
     .replace(/^de /i, '').replace(/\s+(na|no|em|pra|para)$/i, '').trim();
 }
 
 function addCompromisso(orig) {
-  let h = extrairHora(orig.replace(RE_DATA, ' '));
-  const data = extrairData(orig);
+  let h = extrairHora(orig.replace(RE_DATA, ' ').replace(RE_DIA, ' '));
+  let data = extrairData(orig);
   const titulo = limpar(orig);
   if (!titulo) return 'Diga o compromisso. Exemplo: me lembra de ir ao médico amanhã às 15h.';
-  // sem horário não dá para avisar: pergunta até ter um
+  // dia e horário são obrigatórios: pergunta até ter os dois
+  while (!data) {
+    const resp = prompt(`Que dia é "${capitalizar(titulo)}"? (ex: hoje, amanhã, sexta, 15/11)`);
+    if (resp === null) return 'Compromisso não anotado: faltou o dia.';
+    const r = resp.trim();
+    data = extrairData(/^\d{1,2}$/.test(r) ? 'dia ' + r : r);
+    if (data && data < iso()) data = null;
+  }
   while (!h) {
     const resp = prompt(`Que horas é "${capitalizar(titulo)}"? (ex: 15h ou 15:30)`);
     if (resp === null) return 'Compromisso não anotado: faltou o horário.';
     h = extrairHora(resp.trim().replace(/^(\d{1,2})$/, '$1h'));
   }
   db.compromissos.push({ id: uid(), titulo: capitalizar(titulo), data, hora: h ? h.hora : null, avisado: false, avisadoAntes: false });
+  calDia = data; calMes = data.slice(0, 7); // a agenda abre no dia do compromisso
   return `Anotado: ${capitalizar(titulo)}, ${data === iso() ? 'hoje' : brData(data)}${h ? ' às ' + h.hora : ''}.`;
 }
 
@@ -295,7 +321,7 @@ function interpretar(orig) {
   if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return addCompromisso(orig);
   // sem palavra-chave: vale a aba aberta ("ir na cama" na aba Rotina vira rotina)
   if (aba === 'rotina') return addRotina(orig);
-  if (aba === 'hoje') return addCompromisso(orig);
+  if (aba === 'agenda') return addCompromisso(orig);
   if (aba === 'gastos' && /\d/.test(n)) return addGasto(orig);
   if (aba === 'metas' && /\d/.test(n)) return criarMeta(orig);
   return 'Não entendi.';
@@ -316,7 +342,7 @@ function abaDoComando(orig) {
   if (/\brotina\b/.test(n)) return 'rotina';
   if (/\b(adiciona|adicionar|guardei|guarda|coloquei|poupei|depositei|soma|somar|meta)\b/.test(n)) return 'metas';
   if (/\b(gastei|gasto|gastar|paguei|pagamos|comprei|despesa)\b/.test(n)) return 'gastos';
-  if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return 'hoje';
+  if (/\b(lembr|lembrete|compromisso|agend|marca|consulta|reuniao)/.test(n)) return 'agenda';
   return aba; // sem palavra-chave: fica na aba aberta
 }
 function processar(txt) {
@@ -426,7 +452,9 @@ function editar(k, id) {
 }
 
 /* ---------- telas ---------- */
-let aba = 'hoje';
+let aba = 'agenda';
+let calMes = iso().slice(0, 7); // mês mostrado no calendário (AAAA-MM)
+let calDia = iso();             // dia escolhido no calendário
 const botoes = (k, id) => `<button class="ed" data-act="edit" data-k="${k}" data-id="${id}">✏️</button><button class="del" data-act="del" data-k="${k}" data-id="${id}">✕</button>`;
 const itemComp = c => `
   <div class="card row">
@@ -452,19 +480,47 @@ const itemMeta = m => `
   </div>`;
 const ordenarPorHora = (a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99');
 
-function viewHoje() {
+// Agenda: calendário do mês; cada dia mostra quantos compromissos tem.
+// Tocar num dia lista os compromissos dele embaixo.
+function viewAgenda() {
   const hoje = iso();
-  const comps = db.compromissos.filter(c => c.data >= hoje)
+  const [ano, mes] = calMes.split('-').map(Number);
+  const primeiro = new Date(ano, mes - 1, 1);
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const porDia = {};
+  db.compromissos.forEach(c => { if (c.data.startsWith(calMes)) porDia[c.data] = (porDia[c.data] || 0) + 1; });
+  const nomeMes = primeiro.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+  let cel = '';
+  for (let i = 0; i < primeiro.getDay(); i++) cel += '<div></div>';
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dia = `${calMes}-${String(d).padStart(2, '0')}`;
+    const n = porDia[dia] || 0;
+    const sel = dia === calDia, eHoje = dia === hoje;
+    cel += `<button data-act="dia" data-id="${dia}" style="aspect-ratio:1;border-radius:10px;font-size:15px;padding:2px;
+      border:${eHoje ? '2px solid var(--pri)' : '1px solid var(--line)'};
+      background:${sel ? 'var(--pri)' : n ? 'color-mix(in srgb, var(--pri) 18%, var(--card))' : 'var(--card)'};
+      color:${sel ? '#fff' : dia < hoje ? 'var(--mut)' : 'var(--txt)'};font-weight:${n ? 700 : 400}">
+      ${d}${n ? `<div style="font-size:11px">● ${n}</div>` : ''}</button>`;
+  }
+  const doDia = db.compromissos.filter(c => c.data === calDia).sort(ordenarPorHora);
+  const proximos = db.compromissos.filter(c => c.data >= hoje)
     .sort((a, b) => (a.data + (a.hora || '99')).localeCompare(b.data + (b.hora || '99')));
   return `
-    <h3>Compromissos</h3>
-    ${comps.slice(0, 8).map(itemComp).join('') || '<div class="card mut">Nenhum compromisso. Diga "me lembra de..."</div>'}
-    <h3>Rotina de hoje</h3>
-    ${db.rotina.slice().sort(ordenarPorHora).map(r => itemRot(r, hoje)).join('') || '<div class="card mut">Rotina vazia. Diga "rotina..."</div>'}
-    <h3>Gastos do mês</h3>
-    <div class="card"><div class="big">${fmtR(totalMes())}</div></div>
-    <h3>Metas</h3>
-    ${db.metas.map(itemMeta).join('') || '<div class="card mut">Nenhuma meta. Diga "meta viagem 5000"</div>'}`;
+    <div class="card" style="max-width:480px;margin:0 auto 10px">
+      <div class="row" style="margin-bottom:8px">
+        <button class="ed" data-act="mes" data-id="-1">◀</button>
+        <div class="grow" style="text-align:center;font-weight:700">${esc(capitalizar(nomeMes))}</div>
+        <button class="ed" data-act="mes" data-id="1">▶</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center">
+        ${['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(x => `<div class="mut" style="font-size:12px">${x}</div>`).join('')}
+        ${cel}
+      </div>
+    </div>
+    <h3>${calDia === hoje ? 'Hoje' : brData(calDia)}</h3>
+    ${doDia.map(itemComp).join('') || '<div class="card mut">Nada marcado neste dia.</div>'}
+    <h3>Próximos compromissos</h3>
+    ${proximos.slice(0, 8).map(itemComp).join('') || '<div class="card mut">Nenhum compromisso. Diga "me lembra de ir ao médico dia 15 às 10h"</div>'}`;
 }
 
 function viewGastos() {
@@ -587,7 +643,7 @@ function viewMetas() {
 
 function render() {
   document.querySelectorAll('#abas button').forEach(b => b.classList.toggle('on', b.dataset.aba === aba));
-  const telas = { hoje: viewHoje, gastos: viewGastos, rotina: viewRotina, metas: viewMetas };
+  const telas = { agenda: viewAgenda, gastos: viewGastos, rotina: viewRotina, metas: viewMetas };
   $('#view').innerHTML = telas[aba]() + (aba === 'gastos' ? relatorioGastos() : '');
 }
 
@@ -602,6 +658,12 @@ $('#view').addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
   if (!b) return;
   const id = b.dataset.id;
+  if (b.dataset.act === 'dia') { calDia = id; render(); return; }
+  if (b.dataset.act === 'mes') {
+    const [a, m] = calMes.split('-').map(Number);
+    calMes = iso(new Date(a, m - 1 + Number(id), 1)).slice(0, 7);
+    render(); return;
+  }
   if (b.dataset.act === 'csv') { baixarCSV(); return; }
   if (b.dataset.act === 'pdf') { gerarPDF(); return; }
   if (b.dataset.act === 'edit') { editar(b.dataset.k, id); render(); return; }
