@@ -55,7 +55,7 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
     <div id="loginMsg" class="mut" style="margin-top:10px"></div>
   </div>
 </div>
-<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 d</small>
+<header>🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400">versão 2026-10-29 e</small>
   <button id="atualizar" style="float:right;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff">🔄 Atualizar</button>
 </header>
 <nav id="abas">
@@ -290,6 +290,13 @@ function interpretar(orig) {
 
 /* ---------- voz e resposta ---------- */
 function responder(t) { $('#resp').textContent = t; }
+function falar(t) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t);
+  u.lang = 'pt-BR';
+  speechSynthesis.speak(u);
+}
 // Abre a aba onde o comando foi anotado (mesma ordem de interpretar())
 function abaDoComando(orig) {
   const n = norm(orig).trim();
@@ -301,7 +308,7 @@ function abaDoComando(orig) {
 function processar(txt) {
   const r = interpretar(txt);
   aba = abaDoComando(txt);
-  salvar(); render(); responder(r);
+  salvar(); render(); responder(r); falar(r);
 }
 
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -325,6 +332,7 @@ function ouvir() {
 /* ---------- lembretes (enquanto o app estiver aberto) ---------- */
 function avisar(msg) {
   responder('🔔 ' + msg);
+  falar(msg);
   if ('Notification' in window && Notification.permission === 'granted') new Notification('Nossa Rotina', { body: msg });
 }
 function checarLembretes() {
