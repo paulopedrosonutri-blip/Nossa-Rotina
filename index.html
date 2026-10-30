@@ -56,7 +56,7 @@ form button{padding:12px 16px;border:0;border-radius:12px;background:var(--pri);
   </div>
 </div>
 <header style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px">
-  <div style="flex:1 1 auto;min-width:0">🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400;white-space:nowrap">versão 2026-10-29 k</small></div>
+  <div style="flex:1 1 auto;min-width:0">🌷 Nossa Rotina <small id="versao" style="font-size:12px;color:var(--mut);font-weight:400;white-space:nowrap">versão 2026-10-30 l</small></div>
   <div style="display:flex;gap:6px;margin-left:auto">
     <button id="avisosBtn" style="display:none;font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--warn);color:#fff;white-space:nowrap">🔔 Ativar avisos</button>
     <button id="atualizar" style="font-size:14px;padding:6px 10px;border:0;border-radius:10px;background:var(--pri);color:#fff;white-space:nowrap">🔄 Atualizar</button>
@@ -719,30 +719,51 @@ const swPronto = 'serviceWorker' in navigator ? navigator.serviceWorker.register
 
 /* ---------- avisos com o app fechado (notificação pela nuvem) ---------- */
 const VAPID_KEY = 'BL00JGGWeigHGTxJ-bbzTU6qYl61dfP2RSnIaLHxLyymH8w_SRnrecKurQAvrJa5OBeKBr8WbXXpIT5nh28vKT8';
-async function registrarAvisos(pedir) {
+// Botão do aviso sempre visível: vermelho = desligado, verde = ligado (clique manda um teste).
+let avisosLigados = false;
+function estadoAvisos(ligado, texto) {
   const btn = $('#avisosBtn');
+  avisosLigados = ligado;
+  btn.style.display = '';
+  btn.style.background = ligado ? 'var(--ok)' : 'var(--warn)';
+  btn.textContent = texto || (ligado ? '🔔 Avisos ligados' : '🔔 Ativar avisos');
+}
+async function registrarAvisos(pedir) {
   try {
-    if (!VAPID_KEY || !swPronto || !('Notification' in window) || !firebase.messaging.isSupported()) return;
+    if (!swPronto || !('Notification' in window) || !(await firebase.messaging.isSupported())) {
+      estadoAvisos(false, '🔕 Sem avisos');
+      if (pedir) responder('Este navegador não recebe avisos. Abra o app pelo Chrome do celular.');
+      return;
+    }
     if (Notification.permission !== 'granted') {
-      if (!pedir) { btn.style.display = ''; return; }
+      estadoAvisos(false);
+      if (!pedir) return;
       if (await Notification.requestPermission() !== 'granted') {
-        btn.style.display = '';
-        responder('Avisos bloqueados. Libere as notificações do site no Chrome.');
+        responder('Avisos bloqueados. No Chrome: cadeado ao lado do endereço > Notificações > Permitir.');
         return;
       }
     }
     const token = await firebase.messaging().getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: await swPronto });
-    if (!token) return;
+    if (!token) { estadoAvisos(false); if (pedir) responder('Não consegui cadastrar este celular. Tente de novo.'); return; }
     await firebase.firestore().collection('tokens').doc(auth.currentUser.email)
       .set({ lista: firebase.firestore.FieldValue.arrayUnion(token) }, { merge: true });
-    btn.style.display = 'none';
-    if (pedir) responder('🔔 Avisos ativados: você recebe mesmo com o app fechado.');
+    estadoAvisos(true);
+    if (pedir) responder('🔔 Avisos ligados. Toque no botão verde para mandar um aviso de teste.');
   } catch (e) {
-    btn.style.display = '';
+    estadoAvisos(false);
     if (pedir) responder('Não consegui ativar os avisos: ' + e.message);
   }
 }
-$('#avisosBtn').addEventListener('click', () => registrarAvisos(true));
+// teste: cria um compromisso daqui a 2 minutos; a nuvem avisa mesmo com o app fechado
+function testarAviso() {
+  if (!confirm('Mandar um aviso de teste? Ele chega em até 2 minutos, mesmo com o app fechado.')) return;
+  const d = new Date(Date.now() + 2 * 60000);
+  const hora = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  db.compromissos.push({ id: uid(), titulo: 'Teste de aviso', data: iso(d), hora, avisado: false, avisadoAntes: false });
+  salvar(); render();
+  responder('Teste marcado para ' + hora + '. Feche o app e espere o aviso. Depois apague o "Teste de aviso" da Agenda.');
+}
+$('#avisosBtn').addEventListener('click', () => avisosLigados ? testarAviso() : registrarAvisos(true));
 $('#form').addEventListener('submit', e => {
   e.preventDefault();
   const t = $('#txt').value.trim();
